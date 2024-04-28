@@ -1,0 +1,48 @@
+const express = require("express");
+const axios = require("axios");
+const cron = require("node-cron");
+const mongoose = require("mongoose");
+const Token = require("./models/Token"); // Mongoose model for Tokens
+
+const app = express();
+const COINGECKO_API_URL = "https://api.coingecko.com/api/v3";
+
+// Connect to MongoDB
+mongoose.connect("mongodb://localhost:27017/tokenDatabase");
+
+// Scheduled task to run every night at 00:00
+cron.schedule("0 0 * * *", async () => {
+  console.log("Fetching token list from CoinGecko");
+  const tokenList = await fetchTokenList();
+  const newTokens = await compareWithStoredTokens(tokenList);
+  await fetchAndStoreTokenDetails(newTokens);
+});
+
+async function fetchTokenList() {
+  const response = await axios.get(`${COINGECKO_API_URL}/coins/list`);
+  return response.data;
+}
+
+async function compareWithStoredTokens(tokenList) {
+  const storedTokens = await Token.find({});
+  const storedTokenIds = new Set(storedTokens.map((token) => token.id));
+  return tokenList.filter((token) => !storedTokenIds.has(token.id));
+}
+
+async function fetchAndStoreTokenDetails(newTokens) {
+  for (const token of newTokens) {
+    const details = await axios.get(`${COINGECKO_API_URL}/coins/${token.id}`);
+    const newToken = new Token({
+      id: token.id,
+      name: token.name,
+      symbol: token.symbol,
+      ...details.data,
+    });
+    await newToken.save();
+    console.log(`Details stored for token: ${token.id}`);
+  }
+}
+
+app.listen(3000, () => {
+  console.log("Server is running on port 3000");
+});
